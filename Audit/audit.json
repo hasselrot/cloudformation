@@ -1,0 +1,260 @@
+{
+  "AWSTemplateFormatVersion" : "2010-09-09",
+  "Parameters" : {
+    "OperatorEmail": {
+      "Description": "Domain name for your website (example.com)",
+      "Type": "String"
+    }
+
+  },
+
+
+  "Resources" : {
+   "ConfigRole": {
+     "Type": "AWS::IAM::Role",
+     "Properties": {
+      "ManagedPolicyArns": ["arn:aws:iam::aws:policy/service-role/AWSConfigRole"],
+      "AssumeRolePolicyDocument": {
+       "Version" : "2012-10-17",
+       "Statement": [ {
+        "Effect": "Allow",
+        "Principal": {
+         "Service": [ "config.amazonaws.com" ]
+       },
+       "Action": [ "sts:AssumeRole" ]
+     } ]
+     },
+     "RoleName": { "Fn::Join" : [ "_", [ {"Ref": "AWS::StackName"},"configRole" ] ] }
+   }
+ },
+ "CloudWatchLogsRole": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Version" : "2012-10-17",
+     "Statement": [ {
+      "Effect": "Allow",
+      "Principal": {
+       "Service": [ "cloudtrail.amazonaws.com" ]
+     },
+     "Action": [ "sts:AssumeRole" ]
+   } ]
+   },
+   "RoleName": { "Fn::Join" : [ "_", [ {"Ref": "AWS::StackName"},"cloudwatchRole" ] ] }
+ }
+},
+
+"CloudwatchLogsPolicy" : {
+ "Type" : "AWS::IAM::Policy",
+ "Properties" : {
+  "PolicyName" : { "Fn::Join" : [ "_", [ {"Ref": "AWS::StackName"},"configS3Policy" ] ] },
+  "PolicyDocument" : {
+   "Version" : "2012-10-17",
+   "Statement": [ {
+     "Effect"   : "Allow",
+     "Action"   : [
+      "logs:CreateLogStream",
+      "logs:PutLogEvents"
+    ],
+     "Resource": { "Fn::Join" : ["", ["arn:aws:logs:", {"Ref":"AWS::Region"}, ":", {"Ref":"AWS::AccountId"}, ":log-group:", {"Ref":"myLogGroup"}, "*"]]}
+   }]
+ },
+ "Roles" : [{ "Ref" : "CloudWatchLogsRole" }]
+}
+},
+
+"S3Policy" : {
+ "Type" : "AWS::IAM::Policy",
+ "Properties" : {
+  "PolicyName" : { "Fn::Join" : [ "_", [ {"Ref": "AWS::StackName"},"configS3Policy" ] ] },
+  "PolicyDocument" : {
+   "Version" : "2012-10-17",
+   "Statement": [ {
+     "Effect"   : "Allow",
+     "Action"   : [
+      "s3:*"
+    ],
+     "Resource": { "Fn::Join" : ["", ["arn:aws:s3:::", {"Ref":"S3Bucket"}, "/Config/*"]]}
+   } ]
+ },
+ "Roles" : [{ "Ref" : "ConfigRole" }]
+}
+},
+
+
+
+"S3Bucket": {
+  "DeletionPolicy" : "Retain",
+  "Type": "AWS::S3::Bucket",
+  "Properties": {
+    "LifecycleConfiguration": {
+      "Rules": [
+        {
+          "Id": "ExpirationRule",
+          "Status": "Enabled",
+          "ExpirationInDays": "30"
+        }
+      ]
+    }
+  }
+},
+"BucketPolicy" : {
+  "Type" : "AWS::S3::BucketPolicy",
+  "Properties" : {
+    "Bucket" : {"Ref" : "S3Bucket"},
+    "PolicyDocument" : {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "AWSCloudTrailAclCheck",
+          "Effect": "Allow",
+          "Principal": { "Service":"cloudtrail.amazonaws.com"},
+          "Action": "s3:GetBucketAcl",
+          "Resource": { "Fn::Join" : ["", ["arn:aws:s3:::", {"Ref":"S3Bucket"}]]}
+        },
+        {
+          "Sid": "AWSCloudTrailWrite",
+          "Effect": "Allow",
+          "Principal": { "Service":"cloudtrail.amazonaws.com"},
+          "Action": "s3:PutObject",
+          "Resource": { "Fn::Join" : ["", ["arn:aws:s3:::", {"Ref":"S3Bucket"}, "/CloudTrail/AWSLogs/", {"Ref":"AWS::AccountId"}, "/*"]]},
+          "Condition": {
+            "StringEquals": {
+              "s3:x-amz-acl": "bucket-owner-full-control"
+            }
+          }
+        }
+      ]
+    }
+  }
+},
+
+"myLogGroup": {
+  "Type" : "AWS::Logs::LogGroup",
+  "Properties" : {
+    "LogGroupName" : "CloudTrail/DefaultLogGroup",
+    "RetentionInDays" : 14
+  }
+},
+
+"Topic": {
+  "Type": "AWS::SNS::Topic",
+  "Properties": {
+    "Subscription": [ {
+      "Endpoint": { "Ref": "OperatorEmail" },
+    "Protocol": "email" } ]
+  }
+},
+"TopicPolicy" : {
+  "Type" : "AWS::SNS::TopicPolicy",
+  "Properties" : {
+    "Topics" : [{"Ref":"Topic"}],
+    "PolicyDocument" : {
+      "Version": "2008-10-17",
+      "Statement": [
+        {
+          "Sid": "AWSCloudTrailSNSPolicy",
+          "Effect": "Allow",
+          "Principal": { "Service":"cloudtrail.amazonaws.com"},
+          "Resource": "*",
+          "Action": "SNS:Publish"
+        },
+        {
+          "Sid": "AWSCloudWatchSNSPolicy",
+          "Effect": "Allow",
+          "Principal": { "Service":"events.amazonaws.com"},
+          "Resource": "*",
+          "Action": "SNS:Publish"
+        }
+      ]
+    }
+  }
+},
+
+"myTrail" : {
+  "DependsOn" : ["BucketPolicy", "CloudwatchLogsPolicy"],
+  "Type" : "AWS::CloudTrail::Trail",
+  "Properties" : {
+    "S3BucketName" : {"Ref":"S3Bucket"},
+    "IsLogging" : true,
+    "IsMultiRegionTrail" : true,
+    "IncludeGlobalServiceEvents" : true,
+    "EnableLogFileValidation" : true,
+    "S3KeyPrefix" : "CloudTrail",
+    "CloudWatchLogsLogGroupArn" : { "Fn::Join" : ["", ["arn:aws:logs:", {"Ref":"AWS::Region"}, ":", {"Ref":"AWS::AccountId"}, ":log-group:", {"Ref":"myLogGroup"}, ":*"]]},
+    "CloudWatchLogsRoleArn" : { "Fn::Join" : ["", ["arn:aws:iam::", {"Ref":"AWS::AccountId"}, ":role/", {"Ref":"AWS::StackName"}, "_cloudwatchRole"]]}
+  }
+},
+
+"myConfig" : {
+  "Type" : "AWS::Config::ConfigurationRecorder",
+  "Properties" : {
+    "Name" : "ConfigRecorder",
+    "RecordingGroup" : {
+      "AllSupported" : true,
+      "IncludeGlobalResourceTypes" : true
+    },
+    "RoleARN" : {
+      "Fn::GetAtt": [
+        "ConfigRole",
+        "Arn"
+      ]}
+    }
+  },
+
+  "DeliveryChannel": {
+    "Type": "AWS::Config::DeliveryChannel",
+    "Properties": {
+      "S3BucketName": {"Ref": "S3Bucket"},
+      "S3KeyPrefix" : "Config"
+    }
+  },
+
+  "myGuardDuty": {
+    "Type": "AWS::GuardDuty::Detector",
+    "Properties": {
+      "Enable": true
+    }
+  },
+
+  "GuardDutyEventRule": {
+    "Type": "AWS::Events::Rule",
+    "Properties": {
+      "Description": "EventRule",
+      "EventPattern": {
+        "source": [
+          "aws.guardduty"
+        ]
+      },
+      "State": "ENABLED",
+      "Targets": [
+        {
+          "Arn": { "Ref": "Topic" },
+          "Id": "OpsTopic"
+        }
+      ]
+    }
+  },
+  "RootLoginEventRule": {
+    "Type": "AWS::Events::Rule",
+    "Properties": {
+      "Description": "EventRule",
+      "EventPattern" : {
+       "detail-type": ["AWS API Call via CloudTrail","AWS Console Sign In via CloudTrail"],
+       "detail": {
+        "userIdentity": {
+          "type": ["Root"]
+        }
+      }
+    },
+    "State": "ENABLED",
+    "Targets": [
+      {
+        "Arn": { "Ref": "Topic" },
+        "Id": "OpsTopic"
+      }
+    ]
+  }
+}
+}
+}

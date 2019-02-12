@@ -1,0 +1,376 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Kubernetes The Hard Way Node setup, will setup private and public workers as well as master nodes and a jumphost'
+
+Parameters:
+  Environment:
+    Type: String
+    Description: Name for this Environment
+  
+  KeyName:
+    Description: The EC2 Key Pair to allow SSH access to the instances
+    Type: AWS::EC2::KeyPair::KeyName
+
+  InstanceType:
+    Description: EC2 instance type for the node instances
+    Type: String
+    Default: t3.small
+    ConstraintDescription: Must be a valid EC2 instance type
+  
+  VpcId:
+    Description: The VPC of the worker instances
+    Type: AWS::EC2::VPC::Id
+
+  PrivSubnets:
+    Description: The Private subnets where internal workers can be created.
+    Type: List<AWS::EC2::Subnet::Id>
+
+  PubSubnets:
+    Description: The Public subnets where external workers can be created.
+    Type: List<AWS::EC2::Subnet::Id>
+
+Resources:
+  NodeInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: "/"
+      Roles:
+      - !Ref NodeInstanceRole
+
+  NodeInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - ec2.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+
+  AutoscalerPolicy:
+    Type: AWS::IAM::Policy
+    Properties: 
+      PolicyName: !Sub "${Environment}-Autoscaler-Policy"
+      PolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+          - 
+            Effect: "Allow"
+            Action: 
+              - "autoscaling:DescribeAutoScalingGroups"
+              - "autoscaling:DescribeAutoScalingInstances"
+              - "autoscaling:DescribeTags"
+              - "autoscaling:SetDesiredCapacity"
+              - "autoscaling:TerminateInstanceInAutoScalingGroup"
+            Resource: "*"
+      Roles:
+        - !Ref NodeInstanceRole
+
+  ALBIngressPolicy:
+    Type: AWS::IAM::Policy
+    Properties: 
+      PolicyName: !Sub "${Environment}-ALB-Policy"
+      PolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+          - 
+            Effect: "Allow"
+            Action: 
+              - "acm:DescribeCertificate"
+              - "acm:ListCertificates"
+              - "acm:GetCertificate"
+              - "ec2:AuthorizeSecurityGroupIngress"
+              - "ec2:CreateSecurityGroup"
+              - "ec2:CreateTags"
+              - "ec2:DeleteTags"
+              - "ec2:DeleteSecurityGroup"
+              - "ec2:DescribeAccountAttributes"
+              - "ec2:DescribeAddresses"
+              - "ec2:DescribeInstances"
+              - "ec2:DescribeInstanceStatus"
+              - "ec2:DescribeInternetGateways"
+              - "ec2:DescribeSecurityGroups"
+              - "ec2:DescribeSubnets"
+              - "ec2:DescribeTags"
+              - "ec2:DescribeVpcs"
+              - "ec2:ModifyInstanceAttribute"
+              - "ec2:ModifyNetworkInterfaceAttribute"
+              - "ec2:RevokeSecurityGroupIngress"
+              - "elasticloadbalancing:AddTags"
+              - "elasticloadbalancing:CreateListener"
+              - "elasticloadbalancing:CreateLoadBalancer"
+              - "elasticloadbalancing:CreateRule"
+              - "elasticloadbalancing:CreateTargetGroup"
+              - "elasticloadbalancing:DeleteListener"
+              - "elasticloadbalancing:DeleteLoadBalancer"
+              - "elasticloadbalancing:DeleteRule"
+              - "elasticloadbalancing:DeleteTargetGroup"
+              - "elasticloadbalancing:DeregisterTargets"
+              - "elasticloadbalancing:DescribeListeners"
+              - "elasticloadbalancing:DescribeLoadBalancers"
+              - "elasticloadbalancing:DescribeLoadBalancerAttributes"
+              - "elasticloadbalancing:DescribeRules"
+              - "elasticloadbalancing:DescribeSSLPolicies"
+              - "elasticloadbalancing:DescribeTags"
+              - "elasticloadbalancing:DescribeTargetGroups"
+              - "elasticloadbalancing:DescribeTargetGroupAttributes"
+              - "elasticloadbalancing:DescribeTargetHealth"
+              - "elasticloadbalancing:ModifyListener"
+              - "elasticloadbalancing:ModifyLoadBalancerAttributes"
+              - "elasticloadbalancing:ModifyRule"
+              - "elasticloadbalancing:ModifyTargetGroup"
+              - "elasticloadbalancing:ModifyTargetGroupAttributes"
+              - "elasticloadbalancing:RegisterTargets"
+              - "elasticloadbalancing:RemoveTags"
+              - "elasticloadbalancing:SetIpAddressType"
+              - "elasticloadbalancing:SetSecurityGroups"
+              - "elasticloadbalancing:SetSubnets"
+              - "elasticloadbalancing:SetWebACL"
+              - "iam:CreateServiceLinkedRole"
+              - "iam:GetServerCertificate"
+              - "iam:ListServerCertificates"
+              - "waf-regional:GetWebACLForResource"
+              - "waf-regional:GetWebACL"
+              - "waf-regional:AssociateWebACL"
+              - "waf-regional:DisassociateWebACL"
+              - "tag:GetResources"
+              - "tag:TagResources"
+              - "waf:GetWebACL"
+            Resource: "*"
+      Roles:
+        - !Ref NodeInstanceRole
+
+  ExternalDNSPolicy:
+    Type: AWS::IAM::Policy
+    Properties: 
+      PolicyName: !Sub "${Environment}-DNS-Policy"
+      PolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+          - 
+            Effect: "Allow"
+            Action: 
+              - "route53:ChangeResourceRecordSets"
+            Resource: "arn:aws:route53:::hostedzone/*"
+          - 
+            Effect: "Allow"
+            Action: 
+              - "route53:ListHostedZones"
+              - "route53:ListResourceRecordSets"
+            Resource: "*"
+      Roles:
+        - !Ref NodeInstanceRole
+
+  ClusterSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow node to communicate with each other
+      VpcId: !Ref VpcId
+      Tags:
+      - Key: env
+        Value: !Ref Environment
+      - Key: Name
+        Value: !Sub "${Environment}-CLUSTER-SG"
+
+  JumphostSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Jumphost Security Group
+      VpcId: !Ref VpcId
+      Tags:
+      - Key: env
+        Value: !Ref Environment
+      - Key: Name
+        Value: !Sub "${Environment}-JUMPHOST-SG"
+
+  JumphostSecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    DependsOn: JumphostSecurityGroup
+    Properties:
+      Description: Allow ssh in to Jumphost
+      GroupId: !Ref JumphostSecurityGroup
+      IpProtocol: tcp
+      CidrIp: 0.0.0.0/0
+      ToPort: 22
+      FromPort: 22
+
+  ClusterSecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    DependsOn: ClusterSecurityGroup
+    Properties:
+      Description: Allow node to communicate with each other
+      GroupId: !Ref ClusterSecurityGroup
+      SourceSecurityGroupId: !Ref ClusterSecurityGroup
+      IpProtocol: '-1'
+      FromPort: 0
+      ToPort: 65535
+  
+  JumptoClusterSecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    DependsOn: 
+    - ClusterSecurityGroup
+    - JumphostSecurityGroup
+    Properties:
+      Description: Allow jumphost to communicate with all nodes in cluster
+      GroupId: !Ref ClusterSecurityGroup
+      SourceSecurityGroupId: !Ref JumphostSecurityGroup
+      IpProtocol: '-1'
+      FromPort: 0
+      ToPort: 65535
+
+  MasterNodeGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      DesiredCapacity: 2
+      LaunchConfigurationName: !Ref MasterLaunchConfig
+      MinSize: 2
+      MaxSize: 3
+      VPCZoneIdentifier:
+        !Ref PrivSubnets
+      Tags:
+      - Key: Name
+        Value: !Sub "${Environment}-MasterNode"
+        PropagateAtLaunch: 'true'
+      - Key: env
+        Value: !Ref Environment
+        PropagateAtLaunch: 'true'
+
+  MasterLaunchConfig:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      AssociatePublicIpAddress: 'false'
+      ImageId: ami-00035f41c82244dab
+      IamInstanceProfile: !Ref NodeInstanceProfile
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      SecurityGroups:
+      - !Ref ClusterSecurityGroup
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 16
+            VolumeType: gp2
+            DeleteOnTermination: true
+
+  PrivNodeGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      DesiredCapacity: 1
+      LaunchConfigurationName: !Ref PrivLaunchConfig
+      MinSize: 1
+      MaxSize: 3
+      VPCZoneIdentifier:
+        !Ref PrivSubnets
+      Tags:
+      - Key: Name
+        Value: !Sub "${Environment}-PrivNode"
+        PropagateAtLaunch: 'true'
+      - Key: !Sub 'kubernetes.io/cluster/${Environment}'
+        Value: 'owned'
+        PropagateAtLaunch: 'true'
+      - Key: env
+        Value: !Ref Environment
+        PropagateAtLaunch: 'true'
+      - Key: k8s.io/cluster-autoscaler/enabled
+        Value: "True"
+        PropagateAtLaunch: 'true'
+      - Key: !Sub 'k8s.io/cluster-autoscaler/${Environment}'
+        Value: "True"
+        PropagateAtLaunch: 'true'
+
+  PrivLaunchConfig:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      AssociatePublicIpAddress: 'false'
+      ImageId: ami-00035f41c82244dab
+      IamInstanceProfile: !Ref NodeInstanceProfile
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      SecurityGroups:
+      - !Ref ClusterSecurityGroup
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 16
+            VolumeType: gp2
+            DeleteOnTermination: true
+
+  PubNodeGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      DesiredCapacity: 1
+      LaunchConfigurationName: !Ref PubLaunchConfig
+      MinSize: 1
+      MaxSize: 3
+      VPCZoneIdentifier:
+        !Ref PubSubnets
+      Tags:
+      - Key: Name
+        Value: !Sub "${Environment}-PubNode"
+        PropagateAtLaunch: 'true'
+      - Key: !Sub 'kubernetes.io/cluster/${Environment}'
+        Value: 'owned'
+        PropagateAtLaunch: 'true'
+      - Key: env
+        Value: !Ref Environment
+        PropagateAtLaunch: 'true'
+      - Key: k8s.io/cluster-autoscaler/enabled
+        Value: "True"
+        PropagateAtLaunch: 'true'
+      - Key: !Sub 'k8s.io/cluster-autoscaler/${Environment}'
+        Value: "True"
+        PropagateAtLaunch: 'true'
+
+  PubLaunchConfig:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      AssociatePublicIpAddress: 'true'
+      ImageId: ami-00035f41c82244dab
+      IamInstanceProfile: !Ref NodeInstanceProfile
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      SecurityGroups:
+      - !Ref ClusterSecurityGroup
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 16
+            VolumeType: gp2
+            DeleteOnTermination: true
+
+  JumpNodeGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      DesiredCapacity: 1
+      LaunchConfigurationName: !Ref JumpLaunchConfig
+      MinSize: 1
+      MaxSize: 1
+      VPCZoneIdentifier:
+        !Ref PubSubnets
+      Tags:
+      - Key: Name
+        Value: !Sub "${Environment}-JumpNode"
+        PropagateAtLaunch: 'true'
+      - Key: env
+        Value: !Ref Environment
+        PropagateAtLaunch: 'true'
+
+  JumpLaunchConfig:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      AssociatePublicIpAddress: 'true'
+      ImageId: ami-00035f41c82244dab
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      SecurityGroups:
+      - !Ref JumphostSecurityGroup
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 16
+            VolumeType: gp2
+            DeleteOnTermination: true

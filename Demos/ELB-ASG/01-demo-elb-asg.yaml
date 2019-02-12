@@ -1,0 +1,269 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Demo for ELB and Autoscaling'
+
+Parameters:
+  Environment:
+    Type: String
+    Description: Name for this Environment
+    Default: DEMO-ELB-ASG-STACK
+
+  KeyName:
+    Description: The EC2 Key Pair to allow SSH access to the instances
+    Type: AWS::EC2::KeyPair::KeyName
+    Default: hasselrot
+
+  InstanceType:
+    Description: EC2 instance type for the node instances
+    Type: String
+    Default: t3.small
+    ConstraintDescription: Must be a valid EC2 instance type
+
+  VpcBlock:
+    Type: String
+    Default: 10.30.0.0/16
+    Description: The CIDR range for the VPC. This should be a valid private (RFC 1918) CIDR range.
+
+  Subnet01Block:
+    Type: String
+    Default: 10.30.1.0/24
+    Description: CidrBlock for subnet 01 within the VPC
+
+  Subnet02Block:
+    Type: String
+    Default: 10.30.2.0/24
+    Description: CidrBlock for subnet 02 within the VPC
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      -
+        Label:
+          default: "Worker Network Configuration"
+        Parameters:
+          - VpcBlock
+          - Subnet01Block
+          - Subnet02Block
+          - Subnet03Block
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock:  !Ref VpcBlock
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+      - Key: Name
+        Value: !Sub '${AWS::StackName}-VPC'
+      - Key: env
+        Value: !Ref Environment
+
+  InternetGateway:
+    Type: "AWS::EC2::InternetGateway"
+    Properties:
+      Tags:
+      - Key: env
+        Value: !Ref Environment
+
+
+  VPCGatewayAttachment:
+    Type: "AWS::EC2::VPCGatewayAttachment"
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+
+  PubRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+      - Key: Name
+        Value: Public Subnets
+      - Key: Network
+        Value: Public
+      - Key: env
+        Value: !Ref Environment
+
+  Route:
+    DependsOn: VPCGatewayAttachment
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PubRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+  
+  PubSubnet01:
+    Type: AWS::EC2::Subnet
+    Metadata:
+      Comment: Public Subnet 01
+    Properties:
+      AvailabilityZone: "eu-west-1a"
+      CidrBlock:
+        Ref: Subnet01Block
+      VpcId:
+        Ref: VPC
+      MapPublicIpOnLaunch: True
+      Tags:
+      - Key: Name
+        Value: !Sub "${AWS::StackName}-PubSubnet01"
+      - Key: env
+        Value: !Ref Environment
+
+  Subnet01RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PubSubnet01
+      RouteTableId: !Ref PubRouteTable
+
+  PubSubnet02:
+    Type: AWS::EC2::Subnet
+    Metadata:
+      Comment: Public Subnet 02
+    Properties:
+      AvailabilityZone: "eu-west-1b"
+      CidrBlock:
+        Ref: Subnet02Block
+      VpcId:
+        Ref: VPC
+      MapPublicIpOnLaunch: True
+      Tags:
+      - Key: Name
+        Value: !Sub "${AWS::StackName}-PubSubnet02"
+      - Key: env
+        Value: !Ref Environment
+
+  Subnet02RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PubSubnet02
+      RouteTableId: !Ref PubRouteTable
+
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow node communication
+      VpcId: !Ref VPC
+      Tags:
+      - Key: env
+        Value: !Ref Environment
+      - Key: Name
+        Value: !Sub "${Environment}-SG"
+
+  SecurityGroupWEBIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    DependsOn: SecurityGroup
+    Properties:
+      Description: Allow node communication
+      GroupId: !Ref SecurityGroup
+      CidrIp: '0.0.0.0/0'
+      IpProtocol: 'tcp'
+      FromPort: 80
+      ToPort: 80
+
+  SecurityGroupSSHIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    DependsOn: SecurityGroup
+    Properties:
+      Description: Allow node communication
+      GroupId: !Ref SecurityGroup
+      CidrIp: '0.0.0.0/0'
+      IpProtocol: 'tcp'
+      FromPort: 22
+      ToPort: 22
+
+  loadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Scheme: internet-facing
+      Subnets:
+      - Ref: PubSubnet01
+      - Ref: PubSubnet02
+      LoadBalancerAttributes:
+      - Key: idle_timeout.timeout_seconds
+        Value: '50'
+      SecurityGroups:
+      - Ref: SecurityGroup
+      Tags:
+      - Key: env
+        Value: !Ref Environment
+      - Key: Name
+        Value: !Sub "${Environment}-ALB"
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 5
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 2
+      HealthyThresholdCount: 2
+      Matcher:
+        HttpCode: '200'
+      Name: MyTargets
+      Port: 80
+      Protocol: HTTP
+      TargetGroupAttributes:
+      - Key: deregistration_delay.timeout_seconds
+        Value: '20'
+      UnhealthyThresholdCount: 2
+      VpcId:
+        Ref: VPC
+
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+      - Type: forward
+        TargetGroupArn:
+          Ref: TargetGroup
+      LoadBalancerArn:
+        Ref: loadBalancer
+      Port: '80'
+      Protocol: HTTP
+
+  NodeGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      DesiredCapacity: 3
+      LaunchConfigurationName: !Ref LaunchConfig
+      MinSize: 1
+      MaxSize: 3
+      TargetGroupARNs: 
+      - Ref: "TargetGroup"
+      VPCZoneIdentifier:
+      - !Ref PubSubnet01
+      Tags:
+      - Key: Name
+        Value: !Sub "${Environment}-Node"
+        PropagateAtLaunch: 'true'
+      - Key: env
+        Value: !Ref Environment
+        PropagateAtLaunch: 'true'
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MaxBatchSize: '1'
+        MinInstancesInService: 1
+        PauseTime: 'PT30S'
+
+  LaunchConfig:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      ImageId: ami-08935252a36e25f85
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      SecurityGroups:
+      - !Ref SecurityGroup
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 16
+            VolumeType: gp2
+            DeleteOnTermination: true
+      UserData: 
+        Fn::Base64: !Sub |
+            #!/bin/bash -xe
+            yum update -y
+            yum install -y httpd
+            echo "Hello World" > /var/www/html/index.html
+            service httpd start
+            chkconfig httpd on

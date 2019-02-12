@@ -1,0 +1,388 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'EKS Prerequisites, such as VPC and Permissions'
+
+Parameters:
+  VpcBlock:
+    Type: String
+    Default: 10.30.0.0/16
+    Description: The CIDR range for the VPC. This should be a valid private (RFC 1918) CIDR range.
+
+  Subnet01Block:
+    Type: String
+    Default: 10.30.0.0/19
+    Description: CidrBlock for subnet 01 within the VPC
+
+  Subnet02Block:
+    Type: String
+    Default: 10.30.32.0/19
+    Description: CidrBlock for subnet 02 within the VPC
+
+  Subnet03Block:
+    Type: String
+    Default: 10.30.64.0/19
+    Description: CidrBlock for subnet 03 within the VPC
+
+  Subnet04Block:
+    Type: String
+    Default: 10.30.96.0/19
+    Description: CidrBlock for subnet 01 within the VPC
+
+  Subnet05Block:
+    Type: String
+    Default: 10.30.128.0/19
+    Description: CidrBlock for subnet 02 within the VPC
+
+  Subnet06Block:
+    Type: String
+    Default: 10.30.160.0/19
+    Description: CidrBlock for subnet 03 within the VPC
+
+Resources:
+  AWSServiceRoleForAmazonEKS:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - eks.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEKSServicePolicy
+        - arn:aws:iam::aws:policy/AmazonEKSClusterPolicy
+
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock:  !Ref VpcBlock
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+      - Key: Name
+        Value: !Sub '${AWS::StackName}-VPC'
+
+  InternetGateway:
+    Type: "AWS::EC2::InternetGateway"
+
+  VPCGatewayAttachment:
+    Type: "AWS::EC2::VPCGatewayAttachment"
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+
+  NatGatewayEipAZ1:
+    DependsOn:
+    - VPCGatewayAttachment
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  NatGatewayEipAZ2:
+    DependsOn:
+    - VPCGatewayAttachment
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+  
+  NatGatewayEipAZ3:
+    DependsOn:
+    - VPCGatewayAttachment
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  NatGatewayAZ1:
+    DependsOn:
+    - NatGatewayEipAZ1
+    - PubSubnet01
+    - VPCGatewayAttachment
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId:
+        Fn::GetAtt:
+        - NatGatewayEipAZ1
+        - AllocationId
+      SubnetId:
+        Ref: PubSubnet01
+
+  NatGatewayAZ2:
+    DependsOn:
+    - NatGatewayEipAZ2
+    - PubSubnet02
+    - VPCGatewayAttachment
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId:
+        Fn::GetAtt:
+        - NatGatewayEipAZ2
+        - AllocationId
+      SubnetId:
+        Ref: PubSubnet02
+
+  NatGatewayAZ3:
+    DependsOn:
+    - NatGatewayEipAZ3
+    - PubSubnet03
+    - VPCGatewayAttachment
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId:
+        Fn::GetAtt:
+        - NatGatewayEipAZ3
+        - AllocationId
+      SubnetId:
+        Ref: PubSubnet03
+
+  PubRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+      - Key: Name
+        Value: Public Subnets
+      - Key: Network
+        Value: Public
+
+  Route:
+    DependsOn: VPCGatewayAttachment
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PubRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+  
+  PrivRouteTableAZ1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+      - Key: Name
+        Value: PrivRouteTableAZ1
+      - Key: Network
+        Value: Private
+  
+  PrivRouteTableAZ2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+      - Key: Name
+        Value: PrivRouteTableAZ2
+      - Key: Network
+        Value: Private
+
+  PrivRouteTableAZ3:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+      - Key: Name
+        Value: PrivRouteTableAZ3
+      - Key: Network
+        Value: Private
+
+  PrivRouteAZ1:
+    DependsOn:
+    - PrivRouteTableAZ1
+    - NatGatewayAZ1
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId:
+        Ref: PrivRouteTableAZ1
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId:
+        Ref: NatGatewayAZ1
+
+  PrivRouteAZ2:
+    DependsOn:
+    - PrivRouteTableAZ2
+    - NatGatewayAZ2
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId:
+        Ref: PrivRouteTableAZ2
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId:
+        Ref: NatGatewayAZ2
+
+  PrivRouteAZ3:
+    DependsOn:
+    - PrivRouteTableAZ3
+    - NatGatewayAZ3
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId:
+        Ref: PrivRouteTableAZ3
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId:
+        Ref: NatGatewayAZ3
+
+
+  PubSubnet01:
+    Type: AWS::EC2::Subnet
+    Metadata:
+      Comment: Public Subnet 01
+    Properties:
+      AvailabilityZone: !Sub "${AWS::Region}a"
+      CidrBlock:
+        Ref: Subnet01Block
+      VpcId:
+        Ref: VPC
+      Tags:
+      - Key: Name
+        Value: !Sub "${AWS::StackName}-PubSubnet01"
+      - Key: kubernetes.io/role/elb
+        Value: 1
+  
+  PubSubnet02:
+    Type: AWS::EC2::Subnet
+    Metadata:
+      Comment: Public Subnet 02
+    Properties:
+      AvailabilityZone: !Sub "${AWS::Region}b"
+      CidrBlock:
+        Ref: Subnet02Block
+      VpcId:
+        Ref: VPC
+      Tags:
+      - Key: Name
+        Value: !Sub "${AWS::StackName}-PubSubnet02"
+      - Key: kubernetes.io/role/elb
+        Value: 1
+
+  PubSubnet03:
+    Type: AWS::EC2::Subnet
+    Metadata:
+      Comment: Public Subnet 03
+    Properties:
+      AvailabilityZone: !Sub "${AWS::Region}c"
+      CidrBlock:
+        Ref: Subnet03Block
+      VpcId:
+        Ref: VPC
+      Tags:
+      - Key: Name
+        Value: !Sub "${AWS::StackName}-PubSubnet03"
+      - Key: kubernetes.io/role/elb
+        Value: 1
+
+  PrivSubnet04:
+    Type: AWS::EC2::Subnet
+    Metadata:
+      Comment: Private Subnet 04
+    Properties:
+      AvailabilityZone: !Sub "${AWS::Region}a"
+      CidrBlock:
+        Ref: Subnet04Block
+      VpcId:
+        Ref: VPC
+      Tags:
+      - Key: Name
+        Value: !Sub "${AWS::StackName}-PrivSubnet04"
+      - Key: kubernetes.io/role/internal-elb
+        Value: 1
+
+  PrivSubnet05:
+    Type: AWS::EC2::Subnet
+    Metadata:
+      Comment: Private Subnet 05
+    Properties:
+      AvailabilityZone: !Sub "${AWS::Region}b"
+      CidrBlock:
+        Ref: Subnet05Block
+      VpcId:
+        Ref: VPC
+      Tags:
+      - Key: Name
+        Value: !Sub "${AWS::StackName}-PrivSubnet05"
+      - Key: kubernetes.io/role/internal-elb
+        Value: 1
+
+  PrivSubnet06:
+    Type: AWS::EC2::Subnet
+    Metadata:
+      Comment: Private Subnet 06
+    Properties:
+      AvailabilityZone: !Sub "${AWS::Region}c"
+      CidrBlock:
+        Ref: Subnet06Block
+      VpcId:
+        Ref: VPC
+      Tags:
+      - Key: Name
+        Value: !Sub "${AWS::StackName}-PrivSubnet06"
+      - Key: kubernetes.io/role/internal-elb
+        Value: 1
+
+  Subnet01RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PubSubnet01
+      RouteTableId: !Ref PubRouteTable
+
+  Subnet02RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PubSubnet02
+      RouteTableId: !Ref PubRouteTable
+
+  Subnet03RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PubSubnet03
+      RouteTableId: !Ref PubRouteTable
+
+  Subnet04RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivSubnet04
+      RouteTableId: !Ref PrivRouteTableAZ1
+
+  Subnet05RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivSubnet05
+      RouteTableId: !Ref PrivRouteTableAZ2
+
+  Subnet06RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivSubnet06
+      RouteTableId: !Ref PrivRouteTableAZ3
+
+
+
+  ControlPlaneSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Cluster communication with worker nodes
+      VpcId: !Ref VPC
+
+Outputs:
+  SubnetIds:
+    Description: All subnets in the VPC
+    Value: !Join [ ",", [ !Ref PubSubnet01, !Ref PubSubnet02, !Ref PubSubnet03, !Ref PrivSubnet04, !Ref PrivSubnet05, !Ref PrivSubnet06 ] ]
+    Export:
+      Name: !Sub "${AWS::StackName}-SubnetIDs"
+
+  SecurityGroups:
+    Description: Security group for the cluster control plane communication with worker nodes
+    Value: !Join [ ",", [ !Ref ControlPlaneSecurityGroup ] ]
+    Export:
+      Name: !Sub "${AWS::StackName}-SecurityGroup"
+
+  VpcId:
+    Description: The VPC Id
+    Value: !Ref VPC
+    Export:
+      Name: !Sub "${AWS::StackName}-VPC"
+
+  RoleArn:
+    Description: The role that EKS will use to create AWS resources for Kubernetes clusters
+    Value: !GetAtt AWSServiceRoleForAmazonEKS.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-RoleArn"

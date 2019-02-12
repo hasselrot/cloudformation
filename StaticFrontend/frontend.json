@@ -1,0 +1,92 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Parameters": {
+        "RootDomainName": {
+            "Description": "Domain name for your website (example.com)",
+            "Default": "example.com",
+            "Type": "String"
+        },
+        "CertificateARN": {
+            "Description": "ARN for ACM Certificate",
+            "Type": "String"
+        }
+    },
+    "Resources": {
+        "RootBucket": {
+            "Type": "AWS::S3::Bucket",
+            "Properties": {
+                "DeletionPolicy" : "Delete",
+                "BucketName" : {"Ref":"RootDomainName"},                
+                "AccessControl": "PublicRead",
+                "WebsiteConfiguration": {
+                    "IndexDocument":"index.html",
+                    "ErrorDocument":"404.html"
+                }
+            }
+        },
+
+        "myDistribution" : {
+            "Type" : "AWS::CloudFront::Distribution",
+            "Properties" : {
+                "DistributionConfig" : {
+                    "Origins" : [ {
+                        "DomainName" : { "Fn::Join" : [ ".", [ {"Ref":"RootDomainName"},"s3.amazonaws.com" ] ] },
+                        "Id" : "myS3Origin",
+                        "S3OriginConfig" : {
+                            "OriginAccessIdentity" : ""
+                        }
+                    }],
+                    "Enabled" : "true",
+                    "DefaultRootObject" : "index.html",
+                    "Aliases" : [ {"Ref":"RootDomainName"}  ],
+                    "DefaultCacheBehavior" : {
+                        "AllowedMethods" : [ "DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT" ],  
+                        "TargetOriginId" : "myS3Origin",
+                        "ForwardedValues" : {
+                            "QueryString" : "false",
+                            "Cookies" : { "Forward" : "none" }
+                        },
+                        "TrustedSigners" : [],
+                        "ViewerProtocolPolicy" : "redirect-to-https"
+                    },
+                   "ViewerCertificate" : { 
+                        "AcmCertificateArn" : {"Ref":"CertificateARN"},
+                        "SslSupportMethod" : "sni-only",
+                        "MinimumProtocolVersion": "TLSv1.2_2018"
+                    }
+                }
+            }
+        },
+
+    "HostedZone":{
+         "Type":"AWS::Route53::HostedZone",
+         "Properties":{
+            "HostedZoneConfig":{
+               "Comment":""
+            },
+            "Name":{"Ref":"RootDomainName"}
+         }
+      },
+
+        "DnsRecord": {
+            "Properties": {
+                "AliasTarget": {
+                    "DNSName": { "Fn::GetAtt": [ "myDistribution", "DomainName" ] },
+                "HostedZoneId": "Z2FDTNDATAQYW2"
+            },
+        "HostedZoneName": { "Fn::Join" : [ "", [ {"Ref":"RootDomainName"},"." ] ] },
+        "Name": {"Ref":"RootDomainName"},
+        "Type": "A"
+      },
+      "Type": "AWS::Route53::RecordSet"
+    }
+
+
+    },
+    "Outputs": {
+        "WebsiteURL": {
+            "Value": {"Fn::GetAtt": ["RootBucket", "WebsiteURL"]},
+            "Description": "URL for website hosted on S3"
+        }
+    }
+}
