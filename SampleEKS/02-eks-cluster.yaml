@@ -1,11 +1,11 @@
 ---
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'EKS Sample Cluster'
+Description: 'Creates an EKS Cluster in the VPC of the network stack'
 
 Parameters:
   NetworkStack:
     Type: String
-    Description: Name of the NetworkStack
+    Description: Name of the Network Prerequisites Stack
     Default: EKS-NET
 
   ClusterName:

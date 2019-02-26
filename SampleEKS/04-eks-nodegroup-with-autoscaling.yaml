@@ -1,0 +1,126 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Creates an autoscaling group for worker nodes, preconfigured to be automatically detected by the kubernetes autoscaler'
+
+Parameters:
+  NetworkStack:
+    Description: The name of the network stack
+    Type: String
+    Default: EKS-NET
+
+  ClusterStack:
+    Description: The name of the cluster stack
+    Type: String
+    Default: EKS-CLUSTER
+
+  WorkerStack:
+    Description: The name of the nodegroup stack
+    Type: String
+    Default: EKS-WORKER-BASE
+
+  KeyName:
+    Description: The EC2 Key Pair to allow SSH access to the instances
+    Type: AWS::EC2::KeyPair::KeyName
+
+  NodeImageId:
+    Type: AWS::EC2::Image::Id
+    Description: AMI id for the node instances.
+    Default: ami-0a9006fb385703b54
+
+  NodeInstanceType:
+    Description: EC2 instance type for the node instances
+    Type: String
+    Default: t3.medium
+    ConstraintDescription: Must be a valid EC2 instance type
+
+  NodeAutoScalingGroupMinSize:
+    Type: Number
+    Description: Minimum size of Node Group ASG.
+    Default: 2
+
+  NodeAutoScalingGroupMaxSize:
+    Type: Number
+    Description: Maximum size of Node Group ASG. Set to at least 1 greater than NodeAutoScalingGroupDesiredCapacity.
+    Default: 4
+
+  NodeAutoScalingGroupDesiredCapacity:
+    Type: Number
+    Description: Desired capacity of Node Group ASG.
+    Default: 2
+
+  BootstrapArguments:
+    Description: Arguments to pass to the bootstrap script. See files/bootstrap.sh in https://github.com/awslabs/amazon-eks-ami
+    Default: "--kubelet-extra-args --node-labels=mylabelhere=true"
+    Type: String
+
+  NodeGroupName:
+    Description: Unique identifier for the Node Group.
+    Type: String
+    Default: "Worker"
+
+Resources:
+  NodeGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      DesiredCapacity: !Ref NodeAutoScalingGroupDesiredCapacity
+      LaunchConfigurationName: !Ref NodeLaunchConfig
+      MinSize: !Ref NodeAutoScalingGroupMinSize
+      MaxSize: !Ref NodeAutoScalingGroupMaxSize
+      VPCZoneIdentifier: !Split [",",{"Fn::ImportValue": !Sub "${NetworkStack}-SubnetIDs"}]
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Sub:
+            - "${ImportedClusterName}-${NodeGroupName}-Node"
+            - ImportedClusterName:
+                Fn::ImportValue: !Sub "${ClusterStack}-ClusterName"
+        PropagateAtLaunch: 'true'
+      - Key:
+          Fn::Sub: 
+          - kubernetes.io/cluster/${ImportedClusterName}
+          - ImportedClusterName:
+              Fn::ImportValue: !Sub "${ClusterStack}-ClusterName"
+        Value: 'owned'
+        PropagateAtLaunch: 'true'
+      - Key: k8s.io/cluster-autoscaler/enabled
+        Value: "True"
+        PropagateAtLaunch: 'true'
+      - Key:
+          Fn::Sub: 
+          - k8s.io/cluster-autoscaler/${ImportedClusterName}
+          - ImportedClusterName:
+              Fn::ImportValue: !Sub "${ClusterStack}-ClusterName"
+        Value: "True"
+        PropagateAtLaunch: 'true'
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MaxBatchSize: '1'
+        MinInstancesInService: !Ref NodeAutoScalingGroupDesiredCapacity
+        PauseTime: 'PT5M'
+
+  NodeLaunchConfig:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      AssociatePublicIpAddress: 'true'
+      IamInstanceProfile: {"Fn::ImportValue": !Sub "${WorkerStack}-NodeInstanceProfile"}
+      ImageId: !Ref NodeImageId
+      InstanceType: !Ref NodeInstanceType
+      KeyName: !Ref KeyName
+      SecurityGroups:
+      - {"Fn::ImportValue": !Sub "${WorkerStack}-NodeSecurityGroup"}
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 20
+            VolumeType: gp2
+            DeleteOnTermination: true
+      UserData:
+        Fn::Base64:
+          Fn::Sub:
+          - |
+            #!/bin/bash
+            set -o xtrace
+            /etc/eks/bootstrap.sh ${ImportedClusterName} ${BootstrapArguments}
+            /opt/aws/bin/cfn-signal --exit-code $? --stack  ${AWS::StackName} --resource NodeGroup --region ${AWS::Region}
+          - ImportedClusterName:
+              Fn::ImportValue: !Sub "${ClusterStack}-ClusterName"

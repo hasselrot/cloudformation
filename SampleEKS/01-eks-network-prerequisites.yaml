@@ -1,39 +1,39 @@
 ---
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'EKS Prerequisites, such as VPC and Permissions'
+Description: 'Network prerequisites for setting up EKS cluster. Will set up 3 Private and 3 Public subnets.'
 
 Parameters:
-  VpcBlock:
+  VPCCIDR:
     Type: String
     Default: 10.30.0.0/16
     Description: The CIDR range for the VPC. This should be a valid private (RFC 1918) CIDR range.
 
-  Subnet01Block:
+  PubSubnet01Block:
     Type: String
     Default: 10.30.0.0/19
     Description: CidrBlock for subnet 01 within the VPC
 
-  Subnet02Block:
+  PubSubnet02Block:
     Type: String
     Default: 10.30.32.0/19
     Description: CidrBlock for subnet 02 within the VPC
 
-  Subnet03Block:
+  PubSubnet03Block:
     Type: String
     Default: 10.30.64.0/19
     Description: CidrBlock for subnet 03 within the VPC
 
-  Subnet04Block:
+  PrivSubnet04Block:
     Type: String
     Default: 10.30.96.0/19
     Description: CidrBlock for subnet 01 within the VPC
 
-  Subnet05Block:
+  PrivSubnet05Block:
     Type: String
     Default: 10.30.128.0/19
     Description: CidrBlock for subnet 02 within the VPC
 
-  Subnet06Block:
+  PrivSubnet06Block:
     Type: String
     Default: 10.30.160.0/19
     Description: CidrBlock for subnet 03 within the VPC
@@ -58,7 +58,7 @@ Resources:
   VPC:
     Type: AWS::EC2::VPC
     Properties:
-      CidrBlock:  !Ref VpcBlock
+      CidrBlock:  !Ref VPCCIDR
       EnableDnsSupport: true
       EnableDnsHostnames: true
       Tags:
@@ -221,7 +221,6 @@ Resources:
       NatGatewayId:
         Ref: NatGatewayAZ3
 
-
   PubSubnet01:
     Type: AWS::EC2::Subnet
     Metadata:
@@ -229,7 +228,7 @@ Resources:
     Properties:
       AvailabilityZone: !Sub "${AWS::Region}a"
       CidrBlock:
-        Ref: Subnet01Block
+        Ref: PubSubnet01Block
       VpcId:
         Ref: VPC
       Tags:
@@ -245,7 +244,7 @@ Resources:
     Properties:
       AvailabilityZone: !Sub "${AWS::Region}b"
       CidrBlock:
-        Ref: Subnet02Block
+        Ref: PubSubnet02Block
       VpcId:
         Ref: VPC
       Tags:
@@ -261,7 +260,7 @@ Resources:
     Properties:
       AvailabilityZone: !Sub "${AWS::Region}c"
       CidrBlock:
-        Ref: Subnet03Block
+        Ref: PubSubnet03Block
       VpcId:
         Ref: VPC
       Tags:
@@ -277,7 +276,7 @@ Resources:
     Properties:
       AvailabilityZone: !Sub "${AWS::Region}a"
       CidrBlock:
-        Ref: Subnet04Block
+        Ref: PrivSubnet04Block
       VpcId:
         Ref: VPC
       Tags:
@@ -293,7 +292,7 @@ Resources:
     Properties:
       AvailabilityZone: !Sub "${AWS::Region}b"
       CidrBlock:
-        Ref: Subnet05Block
+        Ref: PrivSubnet05Block
       VpcId:
         Ref: VPC
       Tags:
@@ -309,7 +308,7 @@ Resources:
     Properties:
       AvailabilityZone: !Sub "${AWS::Region}c"
       CidrBlock:
-        Ref: Subnet06Block
+        Ref: PrivSubnet06Block
       VpcId:
         Ref: VPC
       Tags:
@@ -353,8 +352,6 @@ Resources:
     Properties:
       SubnetId: !Ref PrivSubnet06
       RouteTableId: !Ref PrivRouteTableAZ3
-
-
 
   ControlPlaneSecurityGroup:
     Type: AWS::EC2::SecurityGroup
