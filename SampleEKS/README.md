@@ -65,9 +65,10 @@ The difference between 04 and 05 is in the tagging that controls the Kubernetes 
 
 04-eks-nodegroup-with-autoscaling.yaml has the following configuration on the Autoscaling group:
 
-```- Key: k8s.io/cluster-autoscaler/enabled
-        Value: "True"
-        PropagateAtLaunch: 'true'
+```
+- Key: k8s.io/cluster-autoscaler/enabled
+    Value: "True"
+    PropagateAtLaunch: 'true'
 ```
 
 ### Parameters
