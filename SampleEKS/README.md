@@ -3,17 +3,17 @@ These Cloudformation templates aim to make deployment of a production grade EKS 
 While still supporting features like multiple groups of EKS nodes, Kubernetes Autoscaler and External DNS.
 
 ### Load balancing
-These stacks are prepared for use with AWS ALB Ingress Controller.
+These stacks are prepared for use with AWS ALB Ingress Controller.<br>
 https://aws.amazon.com/blogs/opensource/kubernetes-ingress-aws-alb-ingress-controller/
 
 No ALB will be created by these stacks, but when you deploy the ALB Ingress controller you can control the automatic creation of ALBs.
 
 ### External DNS
-These stacks are prepared for use with Kubernetes External DNS.
+These stacks are prepared for use with Kubernetes External DNS.<br>
 https://github.com/kubernetes-incubator/external-dns
 
 ### Auto scaling
-These stacks are prepared for use with Kubernetes Autoscaler.
+These stacks are prepared for use with Kubernetes Autoscaler.<br>
 https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/cloudprovider/aws/README.md
 
 ### Overview of the templates
