@@ -63,6 +63,8 @@ They can both be run multiple times, if you for example want to have a group of 
 
 The difference between 04 and 05 is in the tagging that controls the Kubernetes Autoscaler.
 
+Remember that the `AMI id` in `NodeImageId` is unique to every region. Change the default to match your region.
+
 04-eks-nodegroup-with-autoscaling.yaml has the following configuration on the Autoscaling group:
 
 ```
